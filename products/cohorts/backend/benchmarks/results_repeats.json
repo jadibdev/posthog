@@ -1,0 +1,609 @@
+[
+    {
+        "kind": "replace",
+        "members": 1000000,
+        "churn": 0.0,
+        "stale": 0,
+        "added": 0,
+        "seed_seconds": 16.7,
+        "replace_seconds": 48.2,
+        "phase_seconds": {
+            "mint_population_marker": 0.02,
+            "insert_cohort_query_actors_into_ch": 2.75,
+            "insert_cohort_people_into_pg": 20.24,
+            "prune_members_absent_from_replace": 24.86,
+            "prune_static_cohort_rows_before_marker": 0.14
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 200,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "resolve_pages": 1000000
+        },
+        "peak_rss_mb_before": 938.8,
+        "peak_rss_mb": 961.1,
+        "postgres_exact": true,
+        "postgres_members": 1000000,
+        "clickhouse_exact_after_seconds": 0.9,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 4
+            },
+            "Insert": {
+                "queries": 3,
+                "read_rows": 4000000,
+                "written_rows": 3000000,
+                "ms": 2609
+            },
+            "Select": {
+                "queries": 303,
+                "read_rows": 64009536,
+                "written_rows": 0,
+                "ms": 4590
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 1
+    },
+    {
+        "kind": "replace",
+        "members": 1000000,
+        "churn": 1.0,
+        "stale": 1000000,
+        "added": 1000000,
+        "seed_seconds": 25.3,
+        "replace_seconds": 122.6,
+        "phase_seconds": {
+            "mint_population_marker": 0.01,
+            "insert_cohort_query_actors_into_ch": 3.18,
+            "insert_cohort_people_into_pg": 43.08,
+            "prune_members_absent_from_replace": 76.21,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 22,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 400,
+            "delete_rpc": 200,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 20580,
+            "resolve_pages": 2000000,
+            "delete_rpc": 1000000
+        },
+        "peak_rss_mb_before": 964.6,
+        "peak_rss_mb": 986.3,
+        "postgres_exact": true,
+        "postgres_members": 1000000,
+        "clickhouse_exact_after_seconds": 9.2,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 4
+            },
+            "Insert": {
+                "queries": 3,
+                "read_rows": 6000576,
+                "written_rows": 4000000,
+                "ms": 3401
+            },
+            "Select": {
+                "queries": 702,
+                "read_rows": 45208960,
+                "written_rows": 0,
+                "ms": 12681
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 1
+    },
+    {
+        "kind": "removal",
+        "method": "per_person",
+        "stale": 100000,
+        "seconds": 317.873,
+        "calls": 100000,
+        "ms_per_member": 3.1787,
+        "removed_all": true,
+        "peak_rss_mb": 952.3,
+        "round": 1
+    },
+    {
+        "kind": "removal",
+        "method": "bulk",
+        "stale": 100000,
+        "seconds": 0.374,
+        "calls": 20,
+        "ms_per_member": 0.0037,
+        "removed_all": true,
+        "peak_rss_mb": 949.1,
+        "round": 1
+    },
+    {
+        "kind": "replace",
+        "members": 10000,
+        "churn": 0.05,
+        "stale": 500,
+        "added": 500,
+        "seed_seconds": 0.2,
+        "replace_seconds": 2.4,
+        "phase_seconds": {
+            "mint_population_marker": 0.01,
+            "insert_cohort_query_actors_into_ch": 0.99,
+            "insert_cohort_people_into_pg": 0.23,
+            "prune_members_absent_from_replace": 1.14,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 3,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 3,
+            "delete_rpc": 1,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 1474,
+            "resolve_pages": 10500,
+            "delete_rpc": 500
+        },
+        "peak_rss_mb_before": 939.2,
+        "peak_rss_mb": 961.4,
+        "postgres_exact": true,
+        "postgres_members": 10000,
+        "clickhouse_exact_after_seconds": 0.1,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 4
+            },
+            "Insert": {
+                "queries": 3,
+                "read_rows": 41500,
+                "written_rows": 30500,
+                "ms": 40
+            },
+            "Select": {
+                "queries": 8,
+                "read_rows": 110000,
+                "written_rows": 0,
+                "ms": 62
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 1
+    },
+    {
+        "kind": "replace",
+        "members": 1000000,
+        "churn": 0.0,
+        "stale": 0,
+        "added": 0,
+        "seed_seconds": 14.1,
+        "replace_seconds": 102.4,
+        "phase_seconds": {
+            "mint_population_marker": 0.06,
+            "insert_cohort_query_actors_into_ch": 3.04,
+            "insert_cohort_people_into_pg": 75.01,
+            "prune_members_absent_from_replace": 24.14,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 2,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 200,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 600,
+            "resolve_pages": 1000000
+        },
+        "peak_rss_mb_before": 939.0,
+        "peak_rss_mb": 961.4,
+        "postgres_exact": true,
+        "postgres_members": 1000000,
+        "clickhouse_exact_after_seconds": 0.6,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 4
+            },
+            "Insert": {
+                "queries": 2,
+                "read_rows": 3000000,
+                "written_rows": 2000000,
+                "ms": 2363
+            },
+            "Select": {
+                "queries": 304,
+                "read_rows": 44866407,
+                "written_rows": 0,
+                "ms": 5872
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 2
+    },
+    {
+        "kind": "replace",
+        "members": 1000000,
+        "churn": 1.0,
+        "stale": 1000000,
+        "added": 1000000,
+        "seed_seconds": 22.5,
+        "replace_seconds": 122.9,
+        "phase_seconds": {
+            "mint_population_marker": 0.01,
+            "insert_cohort_query_actors_into_ch": 3.24,
+            "insert_cohort_people_into_pg": 42.42,
+            "prune_members_absent_from_replace": 77.08,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 22,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 400,
+            "delete_rpc": 200,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 20580,
+            "resolve_pages": 2000000,
+            "delete_rpc": 1000000
+        },
+        "peak_rss_mb_before": 939.5,
+        "peak_rss_mb": 966.0,
+        "postgres_exact": true,
+        "postgres_members": 1000000,
+        "clickhouse_exact_after_seconds": 1.0,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 5
+            },
+            "Insert": {
+                "queries": 3,
+                "read_rows": 6009800,
+                "written_rows": 4000000,
+                "ms": 3331
+            },
+            "Select": {
+                "queries": 703,
+                "read_rows": 47245184,
+                "written_rows": 0,
+                "ms": 13058
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 2
+    },
+    {
+        "kind": "removal",
+        "method": "per_person",
+        "stale": 100000,
+        "seconds": 316.614,
+        "calls": 100000,
+        "ms_per_member": 3.1661,
+        "removed_all": true,
+        "peak_rss_mb": 952.8,
+        "round": 2
+    },
+    {
+        "kind": "removal",
+        "method": "bulk",
+        "stale": 100000,
+        "seconds": 0.361,
+        "calls": 20,
+        "ms_per_member": 0.0036,
+        "removed_all": true,
+        "peak_rss_mb": 949.2,
+        "round": 2
+    },
+    {
+        "kind": "replace",
+        "members": 10000,
+        "churn": 0.05,
+        "stale": 500,
+        "added": 500,
+        "seed_seconds": 0.2,
+        "replace_seconds": 2.4,
+        "phase_seconds": {
+            "mint_population_marker": 0.01,
+            "insert_cohort_query_actors_into_ch": 0.98,
+            "insert_cohort_people_into_pg": 0.2,
+            "prune_members_absent_from_replace": 1.14,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 3,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 3,
+            "delete_rpc": 1,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 1466,
+            "resolve_pages": 10500,
+            "delete_rpc": 500
+        },
+        "peak_rss_mb_before": 942.2,
+        "peak_rss_mb": 964.4,
+        "postgres_exact": true,
+        "postgres_members": 10000,
+        "clickhouse_exact_after_seconds": 0.1,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 8
+            },
+            "Insert": {
+                "queries": 3,
+                "read_rows": 41500,
+                "written_rows": 30500,
+                "ms": 45
+            },
+            "Select": {
+                "queries": 8,
+                "read_rows": 110000,
+                "written_rows": 0,
+                "ms": 62
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 2
+    },
+    {
+        "kind": "replace",
+        "members": 1000000,
+        "churn": 0.0,
+        "stale": 0,
+        "added": 0,
+        "seed_seconds": 13.5,
+        "replace_seconds": 49.5,
+        "phase_seconds": {
+            "mint_population_marker": 0.01,
+            "insert_cohort_query_actors_into_ch": 2.91,
+            "insert_cohort_people_into_pg": 19.77,
+            "prune_members_absent_from_replace": 26.69,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 2,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 200,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 600,
+            "resolve_pages": 1000000
+        },
+        "peak_rss_mb_before": 939.3,
+        "peak_rss_mb": 961.4,
+        "postgres_exact": true,
+        "postgres_members": 1000000,
+        "clickhouse_exact_after_seconds": 2.9,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 4
+            },
+            "Insert": {
+                "queries": 3,
+                "read_rows": 4000000,
+                "written_rows": 3000000,
+                "ms": 2644
+            },
+            "Select": {
+                "queries": 303,
+                "read_rows": 64009536,
+                "written_rows": 0,
+                "ms": 4732
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 3
+    },
+    {
+        "kind": "replace",
+        "members": 1000000,
+        "churn": 1.0,
+        "stale": 1000000,
+        "added": 1000000,
+        "seed_seconds": 23.1,
+        "replace_seconds": 121.1,
+        "phase_seconds": {
+            "mint_population_marker": 0.02,
+            "insert_cohort_query_actors_into_ch": 2.94,
+            "insert_cohort_people_into_pg": 40.63,
+            "prune_members_absent_from_replace": 77.38,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 22,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 400,
+            "delete_rpc": 200,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 20580,
+            "resolve_pages": 2000000,
+            "delete_rpc": 1000000
+        },
+        "peak_rss_mb_before": 939.0,
+        "peak_rss_mb": 965.5,
+        "postgres_exact": true,
+        "postgres_members": 1000000,
+        "clickhouse_exact_after_seconds": 0.9,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 5
+            },
+            "Insert": {
+                "queries": 3,
+                "read_rows": 6000576,
+                "written_rows": 4000000,
+                "ms": 3126
+            },
+            "Select": {
+                "queries": 703,
+                "read_rows": 47383296,
+                "written_rows": 0,
+                "ms": 12844
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 3
+    },
+    {
+        "kind": "removal",
+        "method": "per_person",
+        "stale": 100000,
+        "seconds": 314.382,
+        "calls": 100000,
+        "ms_per_member": 3.1438,
+        "removed_all": true,
+        "peak_rss_mb": 952.9,
+        "round": 3
+    },
+    {
+        "kind": "removal",
+        "method": "bulk",
+        "stale": 100000,
+        "seconds": 0.395,
+        "calls": 20,
+        "ms_per_member": 0.004,
+        "removed_all": true,
+        "peak_rss_mb": 949.7,
+        "round": 3
+    },
+    {
+        "kind": "replace",
+        "members": 10000,
+        "churn": 0.05,
+        "stale": 500,
+        "added": 500,
+        "seed_seconds": 0.2,
+        "replace_seconds": 2.4,
+        "phase_seconds": {
+            "mint_population_marker": 0.01,
+            "insert_cohort_query_actors_into_ch": 1.0,
+            "insert_cohort_people_into_pg": 0.22,
+            "prune_members_absent_from_replace": 1.15,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 3,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 3,
+            "delete_rpc": 1,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 1457,
+            "resolve_pages": 10500,
+            "delete_rpc": 500
+        },
+        "peak_rss_mb_before": 939.0,
+        "peak_rss_mb": 961.2,
+        "postgres_exact": true,
+        "postgres_members": 10000,
+        "clickhouse_exact_after_seconds": 0.0,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 8
+            },
+            "Insert": {
+                "queries": 3,
+                "read_rows": 41500,
+                "written_rows": 30500,
+                "ms": 46
+            },
+            "Select": {
+                "queries": 8,
+                "read_rows": 110000,
+                "written_rows": 0,
+                "ms": 71
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 3
+    }
+]
