@@ -16,11 +16,18 @@ for c in results:
         continue
     ph = c["phase_seconds"]
     rss_delta = round(c["peak_rss_mb"] - c["peak_rss_mb_before"], 1)
+    # Runs before the sampler existed only have the lifetime high-water mark, a lower bound on the replace's use.
+    replace_rss = c.get("replace_rss_mb")
+    rss = (
+        f"rss_before={c['rss_mb_before_replace']}MB rss_peak={c['rss_mb_peak_during_replace']}MB replace_rss={replace_rss}MB"
+        if replace_rss is not None
+        else f"maxrss_delta={rss_delta}MB"
+    )
     print(  # noqa: T201
         f"replace n={c['members']:>8} churn={c['churn']:<4} total={c['replace_seconds']:>7}s "
         f"insert={ph['insert_cohort_query_actors_into_ch']} sync={ph['insert_cohort_people_into_pg']} "
         f"pg_prune={ph['prune_members_absent_from_replace']} ch_prune={ph['prune_static_cohort_rows_before_marker']} "
-        f"rss_delta={rss_delta}MB pg_exact={c['postgres_exact']} ch_exact_after={c['clickhouse_exact_after_seconds']}s "
+        f"{rss} pg_exact={c['postgres_exact']} ch_exact_after={c['clickhouse_exact_after_seconds']}s "
         f"mutations={c['clickhouse_mutations']} delete_rpcs={c['calls'].get('delete_rpc', 0)} "
         f"failed={c['run_failed']} cleared={c['fields_cleared']} calculating={c['is_calculating']}"
     )

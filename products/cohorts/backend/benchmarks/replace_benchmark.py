@@ -34,6 +34,7 @@ import sys
 import json
 import time
 import resource
+import threading
 import subprocess
 from collections import defaultdict
 from collections.abc import Callable, Iterator
@@ -177,7 +178,47 @@ def _cleanup_postgres(team_id: int, cohort_id: int) -> None:
 
 
 def _peak_rss_mb() -> float:
+    """The process's lifetime high-water mark. Anything earlier that raised it hides later use."""
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+
+def _current_rss_mb() -> float:
+    with open("/proc/self/status") as status:
+        for line in status:
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) / 1024
+    raise RuntimeError("VmRSS not found in /proc/self/status")
+
+
+class _RssSampler:
+    """Samples current RSS on a thread while the replace runs, so its own peak is measured, not a lifetime mark.
+
+    A spike shorter than the interval can fall between samples, so the result is the peak of what was sampled.
+    """
+
+    INTERVAL_SECONDS = 0.05
+
+    def __init__(self) -> None:
+        self.peak_mb = 0.0
+        self.samples = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self.peak_mb = max(self.peak_mb, _current_rss_mb())
+            self.samples += 1
+            self._stop.wait(self.INTERVAL_SECONDS)
+
+    def __enter__(self) -> _RssSampler:
+        self.peak_mb = _current_rss_mb()
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._stop.set()
+        self._thread.join()
+        self.peak_mb = max(self.peak_mb, _current_rss_mb())
 
 
 class _Recorder:
@@ -209,7 +250,11 @@ class _Recorder:
 
 
 def _clickhouse_work(started_at: float, finished_at: float) -> dict[str, Any]:
-    """Rows read and written, and query time, for this cell's queries, from the query log."""
+    """Rows read and written, and query time, for this cell's queries, from the query log.
+
+    The window is whole seconds, so the harness's own queries (seeding, polling) are excluded by their tag. Without
+    that, a seed insert finishing in the same second the replace starts would be counted as replace work.
+    """
     _ch("SYSTEM FLUSH LOGS", query_type="bench_flush_logs")
     rows = _ch(
         """
@@ -217,6 +262,7 @@ def _clickhouse_work(started_at: float, finished_at: float) -> dict[str, Any]:
         FROM system.query_log
         WHERE type = 'QueryFinish' AND event_time >= toDateTime(%(started)s) AND event_time <= toDateTime(%(finished)s)
           AND query NOT LIKE '%%system.%%'
+          AND NOT startsWith(JSONExtractString(log_comment, 'query_type'), 'bench_')
         GROUP BY query_kind
         """,
         {"started": int(started_at), "finished": int(finished_at) + 1},
@@ -310,9 +356,11 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
             )
         )
 
+        rss_current_before = _current_rss_mb()
         started_wall = time.time()
         started = time.perf_counter()
-        insert_cohort_from_query(cohort.id, team.id)
+        with _RssSampler() as rss_sampler:
+            insert_cohort_from_query(cohort.id, team.id)
         replace_seconds = time.perf_counter() - started
         finished_wall = time.time()
         finished_mono = time.monotonic()
@@ -334,6 +382,11 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
         "items": dict(recorder.items),
         "peak_rss_mb_before": round(rss_before, 1),
         "peak_rss_mb": round(_peak_rss_mb(), 1),
+        # Sampled current RSS: just before the replace, and the peak while it ran.
+        "rss_mb_before_replace": round(rss_current_before, 1),
+        "rss_mb_peak_during_replace": round(rss_sampler.peak_mb, 1),
+        "replace_rss_mb": round(rss_sampler.peak_mb - rss_current_before, 1),
+        "rss_samples": rss_sampler.samples,
         "postgres_exact": pg_total == members and pg_matching == members,
         "postgres_members": pg_total,
         "clickhouse_exact_after_seconds": consistency_seconds,
@@ -425,12 +478,20 @@ REPEAT_CELLS = (
 )
 
 
-def run_repeats(out_path: str, repeats: int) -> None:
+# The replace cells re-run to measure the replace's own memory with the sampler (the memory bar, as amended).
+MEMORY_CELLS = (
+    ["replace", "10000", "0.05"],
+    ["replace", "1000000", "0.0"],
+    ["replace", "1000000", "1.0"],
+)
+
+
+def run_repeats(out_path: str, repeats: int, cells: tuple[list[str], ...] = REPEAT_CELLS) -> None:
     # Interleaved, one round of every cell before the next, so slow drift in the machine spreads across
     # cells rather than landing on one.
     results = []
     for round_index in range(repeats):
-        for cell in REPEAT_CELLS:
+        for cell in cells:
             print(f"round {round_index + 1}: {' '.join(cell)}", file=sys.stderr, flush=True)  # noqa: T201
             result = _run_cell_subprocess(cell)
             result["round"] = round_index + 1
@@ -444,6 +505,10 @@ def main() -> None:
     if command == "repeats":
         out_path = sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else "results_repeats.json"
         run_repeats(out_path, int(sys.argv[sys.argv.index("--n") + 1]) if "--n" in sys.argv else 3)
+        return
+    if command == "memory":
+        out_path = sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else "results_memory.json"
+        run_repeats(out_path, int(sys.argv[sys.argv.index("--n") + 1]) if "--n" in sys.argv else 1, MEMORY_CELLS)
         return
     if command == "matrix":
         out_path = sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else "results.json"
