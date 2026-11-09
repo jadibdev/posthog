@@ -1,0 +1,195 @@
+[
+    {
+        "kind": "replace",
+        "members": 10000,
+        "churn": 0.05,
+        "stale": 500,
+        "added": 500,
+        "seed_seconds": 0.2,
+        "replace_seconds": 2.5,
+        "phase_seconds": {
+            "mint_population_marker": 0.01,
+            "insert_cohort_query_actors_into_ch": 0.97,
+            "insert_cohort_people_into_pg": 0.33,
+            "prune_members_absent_from_replace": 1.17,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 3,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 3,
+            "delete_rpc": 1,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 1432,
+            "resolve_pages": 10500,
+            "delete_rpc": 500
+        },
+        "peak_rss_mb_before": 939.2,
+        "peak_rss_mb": 961.7,
+        "rss_mb_before_replace": 939.8,
+        "rss_mb_peak_during_replace": 960.7,
+        "replace_rss_mb": 20.9,
+        "rss_samples": 49,
+        "postgres_exact": true,
+        "postgres_members": 10000,
+        "clickhouse_exact_after_seconds": 0.0,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 3
+            },
+            "Insert": {
+                "queries": 1,
+                "read_rows": 21000,
+                "written_rows": 10000,
+                "ms": 25
+            },
+            "Select": {
+                "queries": 7,
+                "read_rows": 90000,
+                "written_rows": 0,
+                "ms": 57
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 1
+    },
+    {
+        "kind": "replace",
+        "members": 1000000,
+        "churn": 0.0,
+        "stale": 0,
+        "added": 0,
+        "seed_seconds": 14.3,
+        "replace_seconds": 45.5,
+        "phase_seconds": {
+            "mint_population_marker": 0.01,
+            "insert_cohort_query_actors_into_ch": 2.74,
+            "insert_cohort_people_into_pg": 19.52,
+            "prune_members_absent_from_replace": 23.03,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 2,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 200,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 600,
+            "resolve_pages": 1000000
+        },
+        "peak_rss_mb_before": 939.3,
+        "peak_rss_mb": 961.6,
+        "rss_mb_before_replace": 939.9,
+        "rss_mb_peak_during_replace": 962.2,
+        "replace_rss_mb": 22.3,
+        "rss_samples": 835,
+        "postgres_exact": true,
+        "postgres_members": 1000000,
+        "clickhouse_exact_after_seconds": 0.8,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 4
+            },
+            "Insert": {
+                "queries": 1,
+                "read_rows": 2000000,
+                "written_rows": 1000000,
+                "ms": 1726
+            },
+            "Select": {
+                "queries": 302,
+                "read_rows": 62009536,
+                "written_rows": 0,
+                "ms": 4260
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 1
+    },
+    {
+        "kind": "replace",
+        "members": 1000000,
+        "churn": 1.0,
+        "stale": 1000000,
+        "added": 1000000,
+        "seed_seconds": 21.7,
+        "replace_seconds": 119.7,
+        "phase_seconds": {
+            "mint_population_marker": 0.1,
+            "insert_cohort_query_actors_into_ch": 2.98,
+            "insert_cohort_people_into_pg": 41.13,
+            "prune_members_absent_from_replace": 75.33,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "settle_sleep": 22,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 400,
+            "delete_rpc": 200,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "settle_sleep": 20580,
+            "resolve_pages": 2000000,
+            "delete_rpc": 1000000
+        },
+        "peak_rss_mb_before": 939.3,
+        "peak_rss_mb": 965.8,
+        "rss_mb_before_replace": 939.8,
+        "rss_mb_peak_during_replace": 966.5,
+        "replace_rss_mb": 26.7,
+        "rss_samples": 2278,
+        "postgres_exact": true,
+        "postgres_members": 1000000,
+        "clickhouse_exact_after_seconds": 7.8,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 5
+            },
+            "Insert": {
+                "queries": 1,
+                "read_rows": 3000576,
+                "written_rows": 1000000,
+                "ms": 2020
+            },
+            "Select": {
+                "queries": 702,
+                "read_rows": 45523712,
+                "written_rows": 0,
+                "ms": 12541
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false,
+        "round": 1
+    }
+]
