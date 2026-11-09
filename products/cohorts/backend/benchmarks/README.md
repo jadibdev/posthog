@@ -32,22 +32,41 @@ Headline figures:
 - **Removing 100k stale members:** per-person took 311–318 s. Bulk took 0.36–0.40 s in three repeats, about 850× faster. The slowest of four bulk runs took 2.42 s, still 129× faster.
 - **Replacing 1M members at 0% churn:** about 48 s. Seven of eight samples fell in 47–54 s.
 - **Replacing 1M members at 100% churn:** about 123 s.
-- **Added memory:** at most 30 MB in any cell.
+- **Memory:** see the section below. The figure in the first runs is only a lower bound.
+
+## Memory
+
+The bar written before the first run was a peak worker RSS of 512 MB or less. As written, it fails in this harness: the dev-mode Django process holds 939–965 MB before the replace starts, and peaked at 961–986 MB. That absolute figure measures the process, not the replace, so the bar was amended after the run to the replace's own memory, with both readings reported.
+
+The first runs recorded the process's lifetime peak (`ru_maxrss`), and found the replace raised it by 22–30 MB, flat from 10k to 1M members. A lifetime peak hides any use below an earlier high point, so that is a lower bound. The `memory` mode measures the replace directly: a thread samples current RSS every 50 ms while it runs, and the result is that peak minus current RSS just before it.
+
+## Notes on the raw results
+
+- `clickhouse_work` in `results.json`, `results_repeats.json` and `results_extra_1m_0.json` comes from a whole-second `query_log` window. It can include the harness's own seed inserts when they finish in the same second the replace starts. The harness now excludes its own queries by tag. No headline figure uses this field.
 
 ## How to run
 
 You need:
 
-- the PostHog dev stack;
-- a release build of `personhog-replica` and `personhog-router` from this branch, in `/tmp/cargo-target/release`;
-- the Rust toolchain on `PATH`.
+- the PostHog dev stack, migrated with `bin/hogli migrations:run` (it needs `sqlx` on `PATH` to migrate the persons database);
+- the PostHog Python environment, either active or as `.venv` in the checkout;
+- a release build of `personhog-replica` and `personhog-router` from this branch, in `/tmp/cargo-target/release`:
 
-`run_bench.sh` starts the replica and router if they aren't running, sets the environment, and runs one mode:
+  ```bash
+  cd rust && CARGO_TARGET_DIR=/tmp/cargo-target cargo build --release -p personhog-replica -p personhog-router
+  ```
+
+- the Rust toolchain, to build them.
+
+Set `CLICKHOUSE_DATABASE` to the ClickHouse database the dev stack was migrated into. It defaults to `default`. A stack migrated through `hogli` uses `posthog`.
+
+`run_bench.sh` works from the checkout that holds it, including a fresh worktree of this branch. It starts the replica and router if they aren't running, sets the environment, and runs one mode:
 
 ```bash
 products/cohorts/backend/benchmarks/run_bench.sh smoke     # three quick cells
 products/cohorts/backend/benchmarks/run_bench.sh all       # the full matrix
 products/cohorts/backend/benchmarks/run_bench.sh repeats   # variance repeats
+products/cohorts/backend/benchmarks/run_bench.sh memory    # the replace's own memory, sampled
 ```
 
 ## Where this differs from production
