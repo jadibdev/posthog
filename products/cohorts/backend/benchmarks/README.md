@@ -24,6 +24,7 @@ It is not part of CI and not part of the replace PR: the PR links here so the nu
 | `results.json`            | First full run: 20 cells, each once.                                                                                        |
 | `results_repeats.json`    | Three interleaved rounds of the five key cells.                                                                             |
 | `results_extra_1m_0.json` | Four extra runs of the 1M replace at 0% churn, after one repeat came in slow (102 s; the other seven samples took 47–54 s). |
+| `results_memory.json`     | The three replace cells with the replace's own memory sampled (see Memory).                                                 |
 
 `python summarize.py results.json` prints one line per cell.
 
@@ -32,13 +33,23 @@ Headline figures:
 - **Removing 100k stale members:** per-person took 311–318 s. Bulk took 0.36–0.40 s in three repeats, about 850× faster. The slowest of four bulk runs took 2.42 s, still 129× faster.
 - **Replacing 1M members at 0% churn:** about 48 s. Seven of eight samples fell in 47–54 s.
 - **Replacing 1M members at 100% churn:** about 123 s.
-- **Memory:** see the section below. The figure in the first runs is only a lower bound.
+- **Memory:** the replace's own memory is 21–27 MB, flat from 10k to 1M members. The process around it holds about 940 MB before the replace starts, so the bar as first written fails; see the section below.
 
 ## Memory
 
 The bar written before the first run was a peak worker RSS of 512 MB or less. As written, it fails in this harness: the dev-mode Django process holds 939–965 MB before the replace starts, and peaked at 961–986 MB. That absolute figure measures the process, not the replace, so the bar was amended after the run to the replace's own memory, with both readings reported.
 
 The first runs recorded the process's lifetime peak (`ru_maxrss`), and found the replace raised it by 22–30 MB, flat from 10k to 1M members. A lifetime peak hides any use below an earlier high point, so that is a lower bound. The `memory` mode measures the replace directly: a thread samples current RSS every 50 ms while it runs, and the result is that peak minus current RSS just before it.
+
+Measured that way (`results_memory.json`, run from a fresh worktree of this branch by following this README):
+
+| Cell           | RSS before the replace | Peak during it | The replace's own memory | Samples |
+| -------------- | ---------------------: | -------------: | -----------------------: | ------: |
+| 10k, 5% churn  |                 940 MB |         961 MB |                    21 MB |      49 |
+| 1M, 0% churn   |                 940 MB |         962 MB |                    22 MB |     835 |
+| 1M, 100% churn |                 940 MB |         967 MB |                    27 MB |   2,278 |
+
+The replace's own memory is flat from 10k to 1M members, which is the O(page) behavior the bar exists to check, and far inside 512 MB. The absolute bar, as written, still fails: the process itself sits at about 940 MB before the replace starts. A peak shorter than the 50 ms sampling interval could fall between samples, but the lifetime-peak readings from the first runs agree with these figures.
 
 ## Notes on the raw results
 
