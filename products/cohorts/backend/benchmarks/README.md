@@ -30,6 +30,8 @@ It is not part of CI and not part of the replace PR: the PR links here so the nu
 
 `results_rebased.json` holds the 8 cells of Actions run [43232873400](https://github.com/jadibdev/posthog-ci/actions/runs/43232873400) (smoke, then memory, then the two 1M replace cells run separately), measured at `2c8926e3797`, the PR head after the rebase onto `upstream/master`, with the harness at `2a9e616`, on a 4-vCPU GitHub-hosted runner rather than the codespace; across that run and run [43208223597](https://github.com/jadibdev/posthog-ci/actions/runs/43208223597) at the same commit, 1M at 0% churn took 49.6–57.7 s, 1M at 100% took 116.2–128.8 s, and the replace's own memory was 21–25 MB.
 
+`results_postsync.json` holds the 8 cells of Actions run [43321877220](https://github.com/jadibdev/posthog-ci/actions/runs/43321877220) (smoke, then memory, then the two 1M replace cells run separately), measured at `773f3681148`, the PR head after the final sync onto `upstream/master`, with the harness at `efd7d67`, on a 4-vCPU GitHub-hosted runner; 1M at 0% churn took 40.2 and 45.3 s, 1M at 100% took 86.9 and 95.1 s, and the replace's own memory was 16.8–25.1 MB.
+
 Headline figures:
 
 - **Removing 100k stale members:** per-person took 311–318 s. Bulk took 0.36–0.40 s in three repeats, about 850× faster. The slowest of four bulk runs took 2.42 s, still 129× faster.
