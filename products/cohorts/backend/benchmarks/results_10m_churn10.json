@@ -1,0 +1,66 @@
+[
+    {
+        "kind": "replace",
+        "members": 10000000,
+        "churn": 0.1,
+        "stale": 1000000,
+        "added": 1000000,
+        "seed_seconds": 156.5,
+        "replace_seconds": 987.0,
+        "phase_seconds": {
+            "mint_population_marker": 0.04,
+            "insert_cohort_query_actors_into_ch": 16.4,
+            "insert_cohort_people_into_pg": 714.88,
+            "prune_members_absent_from_replace": 255.18,
+            "prune_static_cohort_rows_before_marker": 0.01
+        },
+        "calls": {
+            "mint_population_marker": 1,
+            "insert_cohort_query_actors_into_ch": 1,
+            "insert_cohort_people_into_pg": 1,
+            "resolve_pages": 2200,
+            "delete_rpc": 200,
+            "settle_sleep": 20,
+            "prune_members_absent_from_replace": 1,
+            "prune_static_cohort_rows_before_marker": 1
+        },
+        "items": {
+            "resolve_pages": 11000000,
+            "delete_rpc": 1000000,
+            "settle_sleep": 19980
+        },
+        "peak_rss_mb_before": 965.4,
+        "peak_rss_mb": 984.1,
+        "rss_mb_before_replace": 965.7,
+        "rss_mb_peak_during_replace": 984.2,
+        "replace_rss_mb": 18.5,
+        "rss_samples": 18798,
+        "postgres_exact": true,
+        "postgres_members": 10000000,
+        "clickhouse_exact_after_seconds": 4.2,
+        "clickhouse_mutations": 1,
+        "clickhouse_work": {
+            "Delete": {
+                "queries": 1,
+                "read_rows": 0,
+                "written_rows": 0,
+                "ms": 3
+            },
+            "Insert": {
+                "queries": 1,
+                "read_rows": 21005192,
+                "written_rows": 10000000,
+                "ms": 15916
+            },
+            "Select": {
+                "queries": 3402,
+                "read_rows": 8123928768,
+                "written_rows": 0,
+                "ms": 552191
+            }
+        },
+        "run_failed": false,
+        "fields_cleared": true,
+        "is_calculating": false
+    }
+]
