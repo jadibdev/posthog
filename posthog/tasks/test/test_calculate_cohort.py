@@ -1736,15 +1736,17 @@ class TestCohortCalculationTasks(APIBaseTest):
     @parameterized.expand(
         [
             # A sweep redispatch minted a newer marker mid-run, so this replace is fenced out.
-            ("replace_superseded_mid_run", CohortPopulationMode.REPLACE),
+            ("replace_superseded_mid_run", CohortPopulationMode.REPLACE, False),
             # A redispatched replace took the cohort over just before this append finalized.
-            ("append_overtaken_before_finalize", CohortPopulationMode.APPEND),
+            ("append_overtaken_before_finalize", CohortPopulationMode.APPEND, False),
             # The sweep reset took the cohort mid-run: it cleared the marker and released is_calculating,
             # but preserved the mode for the redispatch. The old worker must finalize nothing and leave the mode.
-            ("sweep_reset_mid_run", CohortPopulationMode.REPLACE),
+            ("sweep_reset_mid_run", CohortPopulationMode.REPLACE, True),
         ]
     )
-    def test_query_population_overtaken_mid_run_finalizes_nothing(self, _name: str, mode: CohortPopulationMode) -> None:
+    def test_query_population_overtaken_mid_run_finalizes_nothing(
+        self, _name: str, mode: CohortPopulationMode, sweep_resets: bool
+    ) -> None:
         cohort = Cohort.objects.create(
             team=self.team,
             name="static cohort",
@@ -1756,9 +1758,10 @@ class TestCohortCalculationTasks(APIBaseTest):
         newer_marker = timezone.now().replace(microsecond=0) + timedelta(minutes=5)
 
         def attempt_takes_over(*args: Any, **kwargs: Any) -> int:
-            if _name == "sweep_reset_mid_run":
+            if sweep_resets:
+                # Past the soft time limit, so the sweep no longer counts this attempt's open history row as live.
                 with (
-                    time_machine.travel(timezone.now() + relativedelta(hours=2), tick=False),
+                    time_machine.travel(timezone.now() + relativedelta(hours=5), tick=False),
                     patch("posthog.tasks.calculate_cohort.insert_cohort_from_query.delay") as mock_delay,
                 ):
                     reset_stuck_cohorts()
@@ -1775,7 +1778,7 @@ class TestCohortCalculationTasks(APIBaseTest):
         cohort.refresh_from_db()
         expected = (
             (False, CohortPopulationMode.REPLACE, None)
-            if _name == "sweep_reset_mid_run"
+            if sweep_resets
             else (True, CohortPopulationMode.REPLACE, newer_marker)
         )
         # The overtaking attempt or sweep still holds the cohort: nothing was released or cleared under it.
@@ -1925,7 +1928,7 @@ class TestCohortCalculationTasks(APIBaseTest):
         self.assertFalse(CohortCalculationHistory.objects.filter(cohort=cohort).exists())
 
     def test_replace_retry_after_partial_postgres_prune_converges(self) -> None:
-        # Gate 1 item 28: a retry after a partial Postgres prune converges both stores exact.
+        # A retry after a partial Postgres prune converges both stores exact.
         kept, new, stale1, stale2 = (
             create_person(team=self.team, distinct_ids=[name], properties={"tag": tag}, uuid=uuid4())
             for name, tag in (("kept", "in"), ("new", "in"), ("stale1", "out"), ("stale2", "out"))
