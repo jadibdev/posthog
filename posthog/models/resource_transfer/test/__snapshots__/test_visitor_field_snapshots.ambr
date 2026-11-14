@@ -31,6 +31,7 @@
     'pending_version',
     'people',
     'person_filters_shape_hash',
+    'population_claimed_at',
     'population_marker',
     'version',
   ])
@@ -565,6 +566,7 @@
     'pending_version',
     'people',
     'person_filters_shape_hash',
+    'population_claimed_at',
     'population_marker',
     'properties',
     'realtime_ready_at',
