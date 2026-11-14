@@ -167,8 +167,6 @@ from products.workflows.backend.facade.api import (
 )
 from products.workflows.backend.facade.contracts import CohortDependentWorkflow, HogFlowReference
 
-CohortPopulationModeEnum = CohortPopulationMode
-
 
 def _workflows_relying_on_cohort(cohort: Cohort) -> list[CohortDependentWorkflow]:
     # Most teams have no active cohort workflows, so skip loading every cohort in the project for them.
@@ -863,7 +861,7 @@ class CohortCalculationHistorySerializer(serializers.ModelSerializer):
     total_written_rows = serializers.ReadOnlyField()
     main_query = serializers.ReadOnlyField()
     mode = serializers.ChoiceField(
-        choices=CohortPopulationModeEnum.choices,
+        choices=CohortPopulationMode.choices,
         read_only=True,
         allow_null=True,
         help_text="How this static calculation ran: append added matches to existing members, and replace also pruned non-matches. Null for dynamic cohorts or runs that recorded no mode.",
@@ -889,7 +887,6 @@ class CohortCalculationHistorySerializer(serializers.ModelSerializer):
             "main_query",
             "mode",
         ]
-        read_only_fields = ["mode"]
 
 
 class CohortCalculationHistoryResponseSerializer(serializers.Serializer):
@@ -1352,7 +1349,7 @@ class CohortSerializer(SearchMatchTypeSerializerMixin, serializers.ModelSerializ
     last_error_message = serializers.SerializerMethodField()
     realtime = serializers.SerializerMethodField()
     population_mode = serializers.ChoiceField(
-        choices=CohortPopulationModeEnum.choices,
+        choices=CohortPopulationMode.choices,
         write_only=True,
         required=False,
         help_text=(
@@ -1906,10 +1903,7 @@ class CohortSerializer(SearchMatchTypeSerializerMixin, serializers.ModelSerializ
         if not is_static:
             raise ValidationError({"population_mode": ["population_mode is only supported on static cohorts."]})
 
-        request = self.context.get("request")
-        has_csv = bool(attrs.get("_parsed_csv")) or bool(
-            request is not None and getattr(request, "FILES", {}).get("csv")
-        )
+        has_csv = bool(attrs.get("_parsed_csv")) or self.context["request"].FILES.get("csv") is not None
         if has_csv:
             raise ValidationError({"population_mode": ["population_mode cannot be used with CSV uploads."]})
 
@@ -2047,8 +2041,7 @@ class CohortSerializer(SearchMatchTypeSerializerMixin, serializers.ModelSerializ
         self._validate_no_new_hidden_event_criteria(attrs)
         self._validate_population_mode(attrs)
 
-        request = self.context.get("request")
-        if (request is not None and request.method != "PATCH") or self.instance is None:
+        if self.context["request"].method != "PATCH" or self.instance is None:
             return attrs
 
         if self._reactivates_static_cohort(attrs):
