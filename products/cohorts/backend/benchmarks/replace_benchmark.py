@@ -271,6 +271,24 @@ def _clickhouse_work(started_at: float, finished_at: float) -> dict[str, Any]:
     return {kind: {"queries": q, "read_rows": r, "written_rows": w, "ms": ms} for kind, q, r, w, ms in rows}
 
 
+def _clickhouse_reads_by_query_type(started_at: float, finished_at: float) -> dict[str, Any]:
+    """The same window as _clickhouse_work, split by the query_type tag, so the copy's page reads
+    (static_cohort_sync_page) and the prune's presence checks (static_cohort_replace_membership) show apart."""
+    rows = _ch(
+        """
+        SELECT JSONExtractString(log_comment, 'query_type') AS query_type, count(), sum(read_rows), sum(query_duration_ms)
+        FROM system.query_log
+        WHERE type = 'QueryFinish' AND event_time >= toDateTime(%(started)s) AND event_time <= toDateTime(%(finished)s)
+          AND query NOT LIKE '%%system.%%'
+          AND NOT startsWith(JSONExtractString(log_comment, 'query_type'), 'bench_')
+        GROUP BY query_type
+        """,
+        {"started": int(started_at), "finished": int(finished_at) + 1},
+        "bench_query_log_by_type",
+    )
+    return {query_type or "untagged": {"queries": q, "read_rows": r, "ms": ms} for query_type, q, r, ms in rows}
+
+
 def _mutations(cohort_id: int, started_at: float) -> int:
     rows = _ch(
         """
@@ -318,10 +336,11 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
     seed_seconds = time.perf_counter() - seed_started
     rss_before = _peak_rss_mb()
 
-    # What the API claim would write for a replace.
-    Cohort.objects.filter(pk=cohort.pk).update(
-        is_calculating=True, pending_population_mode=CohortPopulationMode.REPLACE
-    )
+    # What the API claim would write for a replace. Code from before the request time was recorded has no field.
+    claim: dict[str, Any] = {"is_calculating": True, "pending_population_mode": CohortPopulationMode.REPLACE}
+    if hasattr(Cohort, "population_claimed_at"):
+        claim["population_claimed_at"] = util.population_timestamp_now()
+    Cohort.objects.filter(pk=cohort.pk).update(**claim)
 
     recorder = _Recorder()
     phases = (
@@ -342,11 +361,18 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
                 ),
             )
         )
-        stack.enter_context(
-            patch(
-                f"{UTIL}._resolve_person_uuids",
-                recorder.counted("resolve_pages", util._resolve_person_uuids, lambda team_id, ids: len(ids)),
+        # The prune's person lookup: its own helper in older code, the shared person helper since review.
+        if hasattr(util, "_resolve_person_uuids"):
+            resolve_path, resolve = f"{UTIL}._resolve_person_uuids", util._resolve_person_uuids
+        else:
+            from posthog.models.person import util as person_util
+
+            resolve_path, resolve = (
+                "posthog.models.person.util.get_person_uuids_by_ids",
+                person_util.get_person_uuids_by_ids,
             )
+        stack.enter_context(
+            patch(resolve_path, recorder.counted("resolve_pages", resolve, lambda team_id, ids: len(ids)))
         )
         stack.enter_context(patch(f"{UTIL}.REPLACE_PRUNE_SETTLE_SECONDS", 1))
         real_sleep = time.sleep
@@ -392,6 +418,7 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
         "clickhouse_exact_after_seconds": consistency_seconds,
         "clickhouse_mutations": _mutations(cohort.id, started_wall),
         "clickhouse_work": _clickhouse_work(started_wall, finished_wall),
+        "clickhouse_reads_by_query_type": _clickhouse_reads_by_query_type(started_wall, finished_wall),
         "run_failed": bool(history and history.error_code),
         "fields_cleared": cohort.pending_population_mode is None and cohort.population_marker is None,
         "is_calculating": cohort.is_calculating,
