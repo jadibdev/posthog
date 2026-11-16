@@ -1,0 +1,84 @@
+[
+  {
+    "kind": "replace",
+    "members": 10000000,
+    "churn": 0.0,
+    "stale": 0,
+    "added": 0,
+    "seed_seconds": 134.0,
+    "replace_seconds": 534.7,
+    "phase_seconds": {
+      "mint_population_marker": 0.03,
+      "insert_cohort_query_actors_into_ch": 19.17,
+      "insert_cohort_people_into_pg": 269.02,
+      "prune_members_absent_from_replace": 245.79,
+      "prune_static_cohort_rows_before_marker": 0.01
+    },
+    "calls": {
+      "mint_population_marker": 1,
+      "insert_cohort_query_actors_into_ch": 1,
+      "insert_cohort_people_into_pg": 1,
+      "resolve_pages": 200,
+      "prune_members_absent_from_replace": 1,
+      "prune_static_cohort_rows_before_marker": 1
+    },
+    "items": {
+      "resolve_pages": 10000000
+    },
+    "peak_rss_mb_before": 974.0,
+    "peak_rss_mb": 1018.1,
+    "rss_mb_before_replace": 974.5,
+    "rss_mb_peak_during_replace": 1018.3,
+    "replace_rss_mb": 43.8,
+    "rss_samples": 8980,
+    "postgres_exact": true,
+    "postgres_members": 10000000,
+    "clickhouse_exact_after_seconds": 5.3,
+    "clickhouse_mutations": 1,
+    "clickhouse_work": {
+      "Delete": {
+        "queries": 1,
+        "read_rows": 0,
+        "written_rows": 0,
+        "ms": 7
+      },
+      "Insert": {
+        "queries": 1,
+        "read_rows": 20004616,
+        "written_rows": 10000000,
+        "ms": 18680
+      },
+      "Select": {
+        "queries": 2202,
+        "read_rows": 488156138,
+        "written_rows": 0,
+        "ms": 53194
+      }
+    },
+    "clickhouse_reads_by_query_type": {
+      "static_cohort_sync_page": {
+        "queries": 2001,
+        "read_rows": 457195619,
+        "ms": 20854
+      },
+      "static_cohort_replace_membership": {
+        "queries": 200,
+        "read_rows": 20958711,
+        "ms": 32320
+      },
+      "static_cohort_replace_prune": {
+        "queries": 1,
+        "read_rows": 0,
+        "ms": 7
+      },
+      "static_cohort_replace_mint_marker": {
+        "queries": 2,
+        "read_rows": 30006424,
+        "ms": 18700
+      }
+    },
+    "run_failed": false,
+    "fields_cleared": true,
+    "is_calculating": false
+  }
+]
