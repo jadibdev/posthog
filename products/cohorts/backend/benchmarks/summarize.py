@@ -23,11 +23,17 @@ for c in results:
         if replace_rss is not None
         else f"maxrss_delta={rss_delta}MB"
     )
+    ch_prune = ph.get("prune_stale_static_cohort_rows", ph.get("prune_static_cohort_rows_before_marker"))
+    membership = c.get("clickhouse_reads_by_query_type", {}).get("static_cohort_replace_membership", {})
+    mem_info = f" membership_rows={membership['read_rows']} membership_ms={membership['ms']}" if membership else ""
+    retries_289 = c.get("quorum_read_retries_289")
+    retry_info = f" retries_289={retries_289}" if retries_289 is not None else ""
     print(  # noqa: T201
         f"replace n={c['members']:>8} churn={c['churn']:<4} total={c['replace_seconds']:>7}s "
         f"insert={ph['insert_cohort_query_actors_into_ch']} sync={ph['insert_cohort_people_into_pg']} "
-        f"pg_prune={ph['prune_members_absent_from_replace']} ch_prune={ph['prune_static_cohort_rows_before_marker']} "
+        f"pg_prune={ph['prune_members_absent_from_replace']} ch_prune={ch_prune} "
         f"{rss} pg_exact={c['postgres_exact']} ch_exact_after={c['clickhouse_exact_after_seconds']}s "
-        f"mutations={c['clickhouse_mutations']} delete_rpcs={c['calls'].get('delete_rpc', 0)} "
+        f"mutations={c['clickhouse_mutations']} delete_rpcs={c['calls'].get('delete_rpc', 0)}"
+        f"{mem_info}{retry_info} "
         f"failed={c['run_failed']} cleared={c['fields_cleared']} calculating={c['is_calculating']}"
     )

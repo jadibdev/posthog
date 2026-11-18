@@ -33,6 +33,8 @@ import os
 import sys
 import json
 import time
+import uuid
+import hashlib
 import resource
 import threading
 import subprocess
@@ -84,14 +86,33 @@ def _ch(sql: str, params: dict[str, Any] | None = None, query_type: str = "bench
         return sync_execute(sql, params or {})
 
 
-# Deterministic person uuids, built the same way in both stores: the team in the first group, the
-# person's index in the last, so a cell can address its persons without moving ids between stores.
-PG_UUID = "(lpad(to_hex(%(team)s::int), 8, '0') || '-0000-4000-8000-' || lpad(to_hex(i::bigint), 12, '0'))::uuid"
-# ClickHouse's hex() drops leading zero bytes, so both parts are padded explicitly.
-CH_UUID = (
-    "toUUID(concat(leftPad(lower(hex(toUInt32(%(team)s))), 8, '0'), '-0000-4000-8000-', "
-    "leftPad(lower(hex(toUInt64(number))), 12, '0')))"
-)
+# Deterministic hashed person uuids, built identically in both stores from team_id and person index,
+# so ClickHouse UUID ordering does not correlate with Postgres person_id insertion order.
+PG_UUID = "md5(concat(%(team)s::text, ':', i::text))::uuid"
+# MD5 returns big-endian FixedString(16); UUIDNumToString converts variant 1 bytes to canonical RFC 4122 text.
+CH_UUID = "toUUID(UUIDNumToString(MD5(concat(toString(%(team)s), ':', toString(number)))))"
+
+
+def _assert_uuid_hash_matches(team_id: int) -> dict[str, Any]:
+    """Prove Postgres, ClickHouse, and Python produce the exact same hashed UUID before seeding."""
+    expected = str(uuid.UUID(hashlib.md5(f"{team_id}:0".encode()).hexdigest()))
+    with _persons_db() as conn:
+        pg_row = conn.execute(
+            f"SELECT ({PG_UUID})::text FROM (SELECT 0::bigint AS i) AS _bench_sample",
+            {"team": team_id},
+        ).fetchone()
+    ch_rows = _ch(
+        f"SELECT toString({CH_UUID}) FROM numbers(1)",
+        {"team": team_id},
+        "bench_uuid_hash_check",
+    )
+    pg_uuid = str(pg_row[0]) if pg_row else None
+    ch_uuid = str(ch_rows[0][0]) if ch_rows else None
+    if pg_uuid != expected or ch_uuid != expected:
+        raise AssertionError(
+            f"UUID hash mismatch for team {team_id}: pg={pg_uuid!r}, ch={ch_uuid!r}, python={expected!r}"
+        )
+    return {"pg": pg_uuid, "ch": ch_uuid, "python": expected, "equal": True}
 
 
 def _new_team_and_cohort(label: str):
@@ -289,6 +310,24 @@ def _clickhouse_reads_by_query_type(started_at: float, finished_at: float) -> di
     return {query_type or "untagged": {"queries": q, "read_rows": r, "ms": ms} for query_type, q, r, ms in rows}
 
 
+def _clickhouse_289_exceptions(started_at: float, finished_at: float) -> int:
+    """Count error-289 (REPLICA_IS_NOT_IN_QUORUM) query failures logged by ClickHouse in this window."""
+    rows = _ch(
+        """
+        SELECT count()
+        FROM system.query_log
+        WHERE type IN ('ExceptionBeforeStart', 'ExceptionWhileProcessing')
+          AND exception_code = 289
+          AND event_time >= toDateTime(%(started)s) AND event_time <= toDateTime(%(finished)s)
+          AND query NOT LIKE '%%system.%%'
+          AND NOT startsWith(JSONExtractString(log_comment, 'query_type'), 'bench_')
+        """,
+        {"started": int(started_at), "finished": int(finished_at) + 1},
+        "bench_query_log_289",
+    )
+    return int(rows[0][0])
+
+
 def _mutations(cohort_id: int, started_at: float) -> int:
     rows = _ch(
         """
@@ -329,6 +368,7 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
     churned = int(members * churn)
     total = members + churned
     team, cohort = _new_team_and_cohort(f"replace-{members}-{churn}")
+    uuid_hash_check = _assert_uuid_hash_matches(team.id)
 
     seed_started = time.perf_counter()
     _seed_postgres(team.id, cohort.id, total, churned, members)
@@ -348,11 +388,53 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
         "insert_cohort_query_actors_into_ch",
         "insert_cohort_people_into_pg",
         "prune_members_absent_from_replace",
-        "prune_static_cohort_rows_before_marker",
+        "prune_stale_static_cohort_rows",
     )
+    quorum_read_calls = 0
+    quorum_read_retries_289 = 0
     with ExitStack() as stack:
+        import posthog.tasks.calculate_cohort as calc_cohort
+
+        if hasattr(calc_cohort, "is_static_cohort_replace_enabled"):
+            stack.enter_context(
+                patch("posthog.tasks.calculate_cohort.is_static_cohort_replace_enabled", return_value=True)
+            )
+        if hasattr(util, "is_static_cohort_replace_enabled"):
+            stack.enter_context(patch(f"{UTIL}.is_static_cohort_replace_enabled", return_value=True))
         for name in phases:
             stack.enter_context(patch(f"{UTIL}.{name}", recorder.timed(name, getattr(util, name))))
+        if hasattr(util, "_uuids_present_at_marker"):
+            stack.enter_context(
+                patch(
+                    f"{UTIL}._uuids_present_at_marker",
+                    recorder.timed("membership_read", util._uuids_present_at_marker),
+                )
+            )
+        if hasattr(util, "_copy_static_cohort_rows_to_pg"):
+            stack.enter_context(
+                patch(
+                    f"{UTIL}._copy_static_cohort_rows_to_pg",
+                    recorder.timed("copy_static_cohort_rows_to_pg", util._copy_static_cohort_rows_to_pg),
+                )
+            )
+        if hasattr(util, "_retry_quorum_read"):
+            orig_retry_quorum_read = util._retry_quorum_read
+
+            def _counted_retry_quorum_read(read_fn: Callable[[], Any]) -> Any:
+                nonlocal quorum_read_calls, quorum_read_retries_289
+                quorum_read_calls += 1
+                attempts = 0
+
+                def _tracked_read() -> Any:
+                    nonlocal attempts, quorum_read_retries_289
+                    attempts += 1
+                    if attempts > 1:
+                        quorum_read_retries_289 += 1
+                    return read_fn()
+
+                return orig_retry_quorum_read(_tracked_read)
+
+            stack.enter_context(patch(f"{UTIL}._retry_quorum_read", _counted_retry_quorum_read))
         stack.enter_context(
             patch(
                 f"{UTIL}.delete_cohort_members_by_person_ids",
@@ -404,6 +486,12 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
         "seed_seconds": round(seed_seconds, 1),
         "replace_seconds": round(replace_seconds, 1),
         "phase_seconds": {name: round(recorder.seconds[name], 2) for name in phases},
+        "membership_read_seconds": round(recorder.seconds["membership_read"], 2),
+        "membership_read_calls": recorder.calls["membership_read"],
+        "copy_passes": recorder.calls.get("copy_static_cohort_rows_to_pg", 0),
+        "quorum_read_calls": quorum_read_calls,
+        "quorum_read_retries_289": quorum_read_retries_289,
+        "uuid_hash_check": uuid_hash_check,
         "calls": dict(recorder.calls),
         "items": dict(recorder.items),
         "peak_rss_mb_before": round(rss_before, 1),
@@ -419,8 +507,13 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
         "clickhouse_mutations": _mutations(cohort.id, started_wall),
         "clickhouse_work": _clickhouse_work(started_wall, finished_wall),
         "clickhouse_reads_by_query_type": _clickhouse_reads_by_query_type(started_wall, finished_wall),
+        "clickhouse_289_exceptions": _clickhouse_289_exceptions(started_wall, finished_wall),
         "run_failed": bool(history and history.error_code),
-        "fields_cleared": cohort.pending_population_mode is None and cohort.population_marker is None,
+        "fields_cleared": (
+            cohort.pending_population_mode is None
+            and cohort.population_marker is None
+            and getattr(cohort, "population_claimed_at", None) is None
+        ),
         "is_calculating": cohort.is_calculating,
     }
     _cleanup_postgres(team.id, cohort.id)
