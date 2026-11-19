@@ -454,7 +454,7 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
                 person_util.get_person_uuids_by_ids,
             )
         stack.enter_context(
-            patch(resolve_path, recorder.counted("resolve_pages", resolve, lambda team_id, ids: len(ids)))
+            patch(resolve_path, recorder.counted("resolve_pages", resolve, lambda team_id, ids, **_kwargs: len(ids)))
         )
         stack.enter_context(patch(f"{UTIL}.REPLACE_PRUNE_SETTLE_SECONDS", 1))
         real_sleep = time.sleep
