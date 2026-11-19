@@ -1,0 +1,98 @@
+[
+  {
+    "kind": "replace",
+    "members": 10000000,
+    "churn": 0.0,
+    "stale": 0,
+    "added": 0,
+    "seed_seconds": 175.2,
+    "replace_seconds": 542.7,
+    "phase_seconds": {
+      "mint_population_marker": 0.02,
+      "insert_cohort_query_actors_into_ch": 12.66,
+      "insert_cohort_people_into_pg": 314.62,
+      "prune_members_absent_from_replace": 214.97,
+      "prune_stale_static_cohort_rows": 0.01
+    },
+    "membership_read_seconds": 139.54,
+    "membership_read_calls": 200,
+    "copy_passes": 1,
+    "quorum_read_calls": 2202,
+    "quorum_read_retries_289": 0,
+    "uuid_hash_check": {
+      "pg": "e3cdb259-58a8-6fee-4b5f-b294b5b24557",
+      "ch": "e3cdb259-58a8-6fee-4b5f-b294b5b24557",
+      "python": "e3cdb259-58a8-6fee-4b5f-b294b5b24557",
+      "equal": true
+    },
+    "calls": {
+      "mint_population_marker": 1,
+      "insert_cohort_query_actors_into_ch": 1,
+      "copy_static_cohort_rows_to_pg": 1,
+      "insert_cohort_people_into_pg": 1,
+      "resolve_pages": 200,
+      "membership_read": 200,
+      "prune_members_absent_from_replace": 1,
+      "prune_stale_static_cohort_rows": 1
+    },
+    "items": {
+      "resolve_pages": 10000000
+    },
+    "peak_rss_mb_before": 987.2,
+    "peak_rss_mb": 1047.9,
+    "rss_mb_before_replace": 987.0,
+    "rss_mb_peak_during_replace": 1048.2,
+    "replace_rss_mb": 61.2,
+    "rss_samples": 8981,
+    "postgres_exact": true,
+    "postgres_members": 10000000,
+    "clickhouse_exact_after_seconds": 4.5,
+    "clickhouse_mutations": 1,
+    "clickhouse_work": {
+      "Delete": {
+        "queries": 1,
+        "read_rows": 0,
+        "written_rows": 0,
+        "ms": 4
+      },
+      "Insert": {
+        "queries": 1,
+        "read_rows": 20004616,
+        "written_rows": 10000000,
+        "ms": 12369
+      },
+      "Select": {
+        "queries": 2202,
+        "read_rows": 3386897041,
+        "written_rows": 0,
+        "ms": 105751
+      }
+    },
+    "clickhouse_reads_by_query_type": {
+      "static_cohort_sync_page": {
+        "queries": 2001,
+        "read_rows": 488848233,
+        "ms": 17866
+      },
+      "static_cohort_replace_membership": {
+        "queries": 200,
+        "read_rows": 2888047000,
+        "ms": 87869
+      },
+      "static_cohort_replace_prune": {
+        "queries": 1,
+        "read_rows": 0,
+        "ms": 4
+      },
+      "static_cohort_replace_mint_marker": {
+        "queries": 2,
+        "read_rows": 30006424,
+        "ms": 12385
+      }
+    },
+    "clickhouse_289_exceptions": 0,
+    "run_failed": false,
+    "fields_cleared": true,
+    "is_calculating": false
+  }
+]
