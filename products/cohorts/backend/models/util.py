@@ -1992,12 +1992,7 @@ def clear_population_run_fields(
     if marker is None and mode is None:
         Cohort.objects.filter(pk=cohort.pk).update(**state)
         return True
-    owned = Cohort.objects.filter(
-        pk=cohort.pk,
-        population_marker=marker,
-        pending_population_mode=mode,
-        population_claimed_at=claimed_at,
-    )
+    owned = Cohort.objects.filter(pk=cohort.pk)
     # A replace that finished records its marker and floor in the same update, so appends and adds ignore the
     # rows it removes from the moment it stops owning the cohort.
     finished = (
