@@ -937,10 +937,7 @@ def insert_static_cohort(
             )
             return
         except Exception as err:
-            if getattr(err, "code", None) in (
-                CLICKHOUSE_QUORUM_LOCKED_CODE,
-                CLICKHOUSE_UNKNOWN_STATUS_OF_INSERT_CODE,
-            ):
+            if getattr(err, "code", None) == CLICKHOUSE_QUORUM_LOCKED_CODE:
                 logger.warning(
                     "static_cohort_quorum_lock_exhausted",
                     cohort_id=cohort_id,
