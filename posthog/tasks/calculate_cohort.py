@@ -438,22 +438,11 @@ def reset_stuck_cohorts() -> None:
             # Nothing will run this replace again, so its rows are deleted now if it never copied, or HogQL keeps
             # counting them. Decided and done before the save below releases is_calculating and clears the
             # population_marker that bounds the delete.
-            if not _delete_failed_replace_attempt(
+            _delete_failed_replace_attempt(
                 cohort,
                 log_prefix="reset_stuck_static_cohort",
                 replacing=cohort.pending_population_mode == CohortPopulationMode.REPLACE,
-            ):
-                Cohort.objects.filter(pk=cohort.pk).update(last_error_at=timezone.now())
-                logger.warning(
-                    "reset_stuck_static_cohort_cleanup_failed",
-                    cohort_id=cohort.pk,
-                    team_id=cohort.team_id,
-                )
-                capture_exception(
-                    RuntimeError(f"Failed to clean up stuck static cohort {cohort.pk} replace rows"),
-                    additional_properties={"cohort_id": cohort.pk, "team_id": cohort.team_id},
-                )
-                continue
+            )
 
         cohort.is_calculating = False
         cohort.population_marker = None
