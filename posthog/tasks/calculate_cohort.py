@@ -1052,9 +1052,9 @@ def _delete_failed_replace_attempt(cohort: Cohort, *, log_prefix: str, replacing
     )
 
     first_marker = cohort.population_first_marker
-    if not (replacing and not cohort.population_copy_started and first_marker is not None):
+    to_marker = cohort.population_marker
+    if not (replacing and not cohort.population_copy_started and first_marker is not None and to_marker is not None):
         return True
-    to_marker = cohort.population_marker or (population_timestamp_now() + REPLACE_FLOOR_CLOCK_MARGIN)
     try:
         delete_failed_replace_attempt_rows(
             cohort.pk, team_id=cohort.team_id, from_marker=first_marker, to_marker=to_marker
