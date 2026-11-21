@@ -1427,7 +1427,7 @@ def _populate_static_cohort(
                         will_retry=retry is not None,
                     )
 
-            if owns_cohort is True and cleanup_ok:
+            if owns_cohort is True:
                 released = _release_population_claim(
                     claimed,
                     mode=claimed_mode,
