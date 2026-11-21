@@ -2633,9 +2633,7 @@ class CohortSerializer(SearchMatchTypeSerializerMixin, serializers.ModelSerializ
                     mode=population_mode,
                 )
             if cohort.is_static:
-                cohort.save(
-                    update_fields=[field for field in update_fields if field not in COHORT_RECALCULATION_FIELDS]
-                )
+                cohort.save(update_fields=update_fields)
             else:
                 dynamic_update_fields = [*update_fields, "is_calculating"]
                 if was_static:
