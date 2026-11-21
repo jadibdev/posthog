@@ -1690,8 +1690,6 @@ def _copy_static_cohort_rows_to_pg(
         nonlocal new_rows_read, exhausted
         if replace_marker is not None:
             require_current_population_marker(cohort.pk, replace_marker)
-        if still_current is not None and not still_current():
-            raise ReconcileSuperseded(cohort.pk)
         # Tagged per page, because the batch writer between pages may retag.
         tag_queries(product=ProductKey.COHORTS, feature=Feature.COHORT, query_type="static_cohort_sync_page")
 
