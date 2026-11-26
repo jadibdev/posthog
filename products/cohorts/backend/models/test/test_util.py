@@ -1,4 +1,6 @@
+import os
 import uuid
+import tempfile
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import uuid4
@@ -35,6 +37,7 @@ from posthog.exceptions import (
 from posthog.models.event.new_events_schema import events_read_settings
 from posthog.models.instance_setting import override_instance_config
 from posthog.models.person.sql import INSERT_PERSON_STATIC_COHORT, PERSON_STATIC_COHORT_TABLE, REPLACE_ROW_OFFSET
+from posthog.models.person.util import get_person_uuids_by_ids
 from posthog.settings import CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA
 from posthog.test.persons import create_person
 
@@ -85,6 +88,7 @@ from products.cohorts.backend.models.util import (
     print_cohort_hogql_query,
     prune_members_absent_from_replace,
     prune_stale_static_cohort_rows,
+    require_current_population_marker,
     run_cohort_query,
     simplified_cohort_filter_properties,
     sort_cohorts_topologically,
@@ -1414,6 +1418,243 @@ class TestCohortUtils(BaseTest):
         self.assertEqual(removed, 2)
         self.assertEqual(list_cohort_member_ids(self.team.pk, cohort.pk), [kept.id])
         self.assertGreaterEqual(mock_kept.call_count, 3)
+
+    @staticmethod
+    def _clickhouse_order(person_uuid: str) -> bytes:
+        # ClickHouse sorts the UUID type by its last 8 bytes, then its first 8.
+        raw = uuid.UUID(person_uuid).bytes
+        return raw[8:] + raw[:8]
+
+    def _kept_row(self, cohort: Cohort, person_uuid: Any, marker: datetime) -> None:
+        sync_execute(
+            f"INSERT INTO {PERSON_STATIC_COHORT_TABLE} (id, person_id, cohort_id, team_id, _timestamp, _offset) VALUES",
+            [(uuid4(), person_uuid, cohort.pk, self.team.pk, marker, REPLACE_ROW_OFFSET)],
+        )
+
+    def _recording_kept_rows_reads(self, events: list[str] | None = None) -> tuple[list[dict[str, Any]], Any]:
+        """Wrap the membership check: record each read, and whether its bound changes what it returns."""
+        reads: list[dict[str, Any]] = []
+
+        def read(
+            cohort_id: int,
+            team_id: int,
+            person_uuids: list[str],
+            marker: datetime,
+            *,
+            floor: datetime,
+            bounds: tuple[str, str] | None = None,
+        ) -> set[str]:
+            if events is not None:
+                events.append("check")
+            bounded = _uuids_with_kept_rows(cohort_id, team_id, person_uuids, marker, floor=floor, bounds=bounds)
+            unbounded = _uuids_with_kept_rows(cohort_id, team_id, person_uuids, marker, floor=floor)
+            reads.append({"uuids": list(person_uuids), "bounds": bounds, "bounded": bounded, "unbounded": unbounded})
+            return bounded
+
+        return reads, read
+
+    def test_replace_prune_walks_members_in_clickhouse_uuid_order(self):
+        # Created in this id order, so ids, plain uuid order and ClickHouse's order all differ. ClickHouse's order is
+        # p2, p1, p4, p3. Batches of two in id order or in plain uuid order would each start above where they end in
+        # ClickHouse's order, so a bounded read of either would match nobody. These four are the whole membership:
+        # another person would re-pair the batches. Fixed uuids, so they're used by this test only.
+        p1, p2, p3, p4 = (
+            create_person(team=self.team, distinct_ids=[f"ch order {i}"], uuid=uuid.UUID(person_uuid))
+            for i, person_uuid in enumerate(
+                (
+                    "00000000-0000-0004-0000-000000000002",
+                    "00000000-0000-0002-0000-000000000001",
+                    "00000000-0000-0003-0000-000000000004",
+                    "00000000-0000-0001-0000-000000000003",
+                )
+            )
+        )
+        cohort = Cohort.objects.create(team=self.team, name="clickhouse order", is_static=True)
+        insert_cohort_members(self.team.pk, cohort.pk, [p1.id, p2.id, p3.id, p4.id], None)
+        marker = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
+        Cohort.objects.filter(pk=cohort.pk).update(population_marker=marker)
+        # p2 and p3 are kept, so each correct batch holds one kept and one stale member.
+        for kept in (p2, p3):
+            self._kept_row(cohort, kept.uuid, marker)
+        reads, read = self._recording_kept_rows_reads()
+
+        # Two members per check and per sorted run, so the members are spilled, merged and checked in two batches.
+        with (
+            patch("products.cohorts.backend.models.util.REPLACE_PRUNE_CHECK_BATCH", 2),
+            patch("products.cohorts.backend.models.util.PRUNE_SPILL_RUN_SIZE", 2),
+            patch("products.cohorts.backend.models.util._uuids_with_kept_rows", side_effect=read),
+        ):
+            removed = prune_members_absent_from_replace(cohort, team_id=self.team.pk, marker=marker, floor=marker)
+
+        self.assertEqual(
+            [read_["uuids"] for read_ in reads[:2]],
+            [[str(p2.uuid), str(p1.uuid)], [str(p4.uuid), str(p3.uuid)]],
+        )
+        for read_ in reads:
+            # Each read is bounded by its own first and last uuid, in ClickHouse's order, and the bound drops nobody.
+            self.assertEqual(read_["bounds"], (read_["uuids"][0], read_["uuids"][-1]))
+            self.assertEqual(read_["uuids"], sorted(read_["uuids"], key=self._clickhouse_order))
+            self.assertEqual(read_["bounded"], read_["unbounded"])
+        # Successive presence reads move forward through the key range.
+        self.assertLessEqual(
+            self._clickhouse_order(reads[0]["bounds"][1]), self._clickhouse_order(reads[1]["bounds"][0])
+        )
+        self.assertEqual(removed, 2)
+        self.assertCountEqual(list_cohort_member_ids(self.team.pk, cohort.pk), [p2.id, p3.id])
+        self.assertCountEqual(list(self._static_cohort_stamps(cohort)), [str(p2.uuid), str(p3.uuid)])
+
+    def test_replace_prune_re_checks_removed_members_in_bounded_batches(self):
+        people = [create_person(team=self.team, distinct_ids=[f"re-check {i}"], uuid=uuid4()) for i in range(4)]
+        cohort = Cohort.objects.create(team=self.team, name="re-check batches", is_static=True)
+        insert_cohort_members(self.team.pk, cohort.pk, [person.id for person in people], None)
+        marker = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
+        Cohort.objects.filter(pk=cohort.pk).update(population_marker=marker)
+        in_order = sorted(people, key=lambda person: self._clickhouse_order(str(person.uuid)))
+        late = in_order[0]
+        events: list[str] = []
+        reads, read = self._recording_kept_rows_reads(events)
+
+        def wait(_seconds: float) -> None:
+            # The late member's add lands before the first re-check, after the prune read them.
+            if "wait" not in events:
+                sync_execute(
+                    f"INSERT INTO {PERSON_STATIC_COHORT_TABLE} (id, person_id, cohort_id, team_id, _timestamp, _offset) VALUES",
+                    [(uuid4(), late.uuid, cohort.pk, self.team.pk, marker + timedelta(seconds=1), 0)],
+                )
+            events.append("wait")
+
+        def delete(*args: Any) -> int:
+            events.append("delete")
+            return delete_cohort_members_by_person_ids(*args)
+
+        # Equal delete chunk, settle batch and check batch, so each flush holds exactly one check batch. Re-inserts go
+        # one at a time, so a re-check that sliced by that size instead would read once per member.
+        with (
+            patch("products.cohorts.backend.models.util.PRUNE_DELETE_CHUNK", 2),
+            patch("products.cohorts.backend.models.util.REPLACE_PRUNE_SETTLE_BATCH", 2),
+            patch("products.cohorts.backend.models.util.REPLACE_PRUNE_CHECK_BATCH", 2),
+            patch("products.cohorts.backend.models.util.PRUNE_PAGE_SIZE", 1),
+            patch("products.cohorts.backend.models.util.REPLACE_PRUNE_SETTLE_SECONDS", 1),
+            patch("products.cohorts.backend.models.util.time.sleep", side_effect=wait),
+            patch("products.cohorts.backend.models.util._uuids_with_kept_rows", side_effect=read),
+            patch("products.cohorts.backend.models.util.delete_cohort_members_by_person_ids", side_effect=delete),
+        ):
+            removed = prune_members_absent_from_replace(cohort, team_id=self.team.pk, marker=marker, floor=marker)
+
+        self.assertEqual(events, ["check", "delete", "wait", "check", "check", "delete", "wait", "check"])
+        restore_reads = [reads[1], reads[3]]
+        self.assertEqual(
+            [restore_read["uuids"] for restore_read in restore_reads],
+            [[str(person.uuid) for person in in_order[:2]], [str(person.uuid) for person in in_order[2:]]],
+        )
+        for restore_read in restore_reads:
+            self.assertEqual(restore_read["bounds"], (restore_read["uuids"][0], restore_read["uuids"][-1]))
+            self.assertEqual(restore_read["bounded"], restore_read["unbounded"])
+        self.assertEqual((removed, list_cohort_member_ids(self.team.pk, cohort.pk)), (3, [late.id]))
+
+    def _people_in_cohort(self, count: int, name: str) -> tuple[Cohort, list[Any], datetime]:
+        people = [create_person(team=self.team, distinct_ids=[f"{name} {i}"], uuid=uuid4()) for i in range(count)]
+        cohort = Cohort.objects.create(team=self.team, name=name, is_static=True)
+        insert_cohort_members(self.team.pk, cohort.pk, [person.id for person in people], None)
+        marker = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
+        Cohort.objects.filter(pk=cohort.pk).update(population_marker=marker)
+        return cohort, people, marker
+
+    def test_replace_prune_stops_while_listing_members_once_superseded(self):
+        cohort, _people, marker = self._people_in_cohort(4, "superseded while listing")
+        spill_dirs: list[str] = []
+        listed_before_second_batch: list[list[str]] = []
+        real_temporary_directory = tempfile.TemporaryDirectory
+        real_require_marker = require_current_population_marker
+        real_resolve = get_person_uuids_by_ids
+
+        def temporary_directory(*args: Any, **kwargs: Any) -> Any:
+            directory = real_temporary_directory(*args, **kwargs)
+            spill_dirs.append(directory.name)
+            return directory
+
+        def resolve(*args: Any, **kwargs: Any) -> dict[int, str]:
+            resolved = real_resolve(*args, **kwargs)
+            # A newer attempt stores its own marker once the first batch has been listed.
+            Cohort.objects.filter(pk=cohort.pk).update(population_marker=marker + timedelta(minutes=1))
+            return resolved
+
+        def require_marker(cohort_id: int, marker_: datetime) -> None:
+            if spill_dirs:
+                listed_before_second_batch.append(os.listdir(spill_dirs[0]))
+            real_require_marker(cohort_id, marker_)
+
+        # Batches of two, and runs of one, so the first batch writes a run file before the second batch is listed.
+        with (
+            patch("products.cohorts.backend.models.util.PRUNE_PAGE_SIZE", 1),
+            patch("products.cohorts.backend.models.util.REPLACE_PRUNE_CHECK_BATCH", 2),
+            patch("products.cohorts.backend.models.util.PRUNE_SPILL_RUN_SIZE", 1),
+            patch("products.cohorts.backend.models.util.tempfile.TemporaryDirectory", side_effect=temporary_directory),
+            patch("products.cohorts.backend.models.util.require_current_population_marker", side_effect=require_marker),
+            patch("posthog.models.person.util.get_person_uuids_by_ids", side_effect=resolve) as resolve_calls,
+            patch("products.cohorts.backend.models.util.delete_cohort_members_by_person_ids") as delete_calls,
+            self.assertRaises(PopulationSuperseded),
+        ):
+            prune_members_absent_from_replace(cohort, team_id=self.team.pk, marker=marker, floor=marker)
+
+        self.assertEqual(listed_before_second_batch, [["run-0"]])
+        self.assertEqual(resolve_calls.call_count, 1)
+        delete_calls.assert_not_called()
+        self.assertFalse(os.path.exists(spill_dirs[0]))
+
+    def test_replace_prune_removes_its_spill_when_a_delete_fails(self):
+        cohort, _people, marker = self._people_in_cohort(3, "spill cleanup")
+        spill_dirs: list[str] = []
+        real_temporary_directory = tempfile.TemporaryDirectory
+
+        def temporary_directory(*args: Any, **kwargs: Any) -> Any:
+            directory = real_temporary_directory(*args, **kwargs)
+            spill_dirs.append(directory.name)
+            return directory
+
+        with (
+            patch("products.cohorts.backend.models.util.PRUNE_SPILL_RUN_SIZE", 1),
+            patch("products.cohorts.backend.models.util.tempfile.TemporaryDirectory", side_effect=temporary_directory),
+            patch(
+                "products.cohorts.backend.models.util.delete_cohort_members_by_person_ids",
+                side_effect=RuntimeError("personhog down"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            prune_members_absent_from_replace(cohort, team_id=self.team.pk, marker=marker, floor=marker)
+
+        self.assertEqual(len(spill_dirs), 1)
+        self.assertFalse(os.path.exists(spill_dirs[0]))
+
+    def test_replace_prune_sorts_a_full_single_run_in_memory(self):
+        cohort, _people, marker = self._people_in_cohort(2, "single run")
+
+        with (
+            patch("products.cohorts.backend.models.util.PRUNE_SPILL_RUN_SIZE", 2),
+            patch(
+                "products.cohorts.backend.models.util.tempfile.TemporaryDirectory",
+                wraps=tempfile.TemporaryDirectory,
+            ) as temporary_directory,
+        ):
+            removed = prune_members_absent_from_replace(cohort, team_id=self.team.pk, marker=marker, floor=marker)
+
+        temporary_directory.assert_not_called()
+        self.assertEqual((removed, list_cohort_member_ids(self.team.pk, cohort.pk)), (2, []))
+
+    def test_replace_prune_reads_every_spilled_member(self):
+        cohort, people, marker = self._people_in_cohort(5, "whole records")
+        reads, read = self._recording_kept_rows_reads()
+
+        # A run file of three records read two at a time, so the last read of each file is short.
+        with (
+            patch("products.cohorts.backend.models.util.PRUNE_SPILL_RUN_SIZE", 3),
+            patch("products.cohorts.backend.models.util.PRUNE_SPILL_READ_RECORDS", 2),
+            patch("products.cohorts.backend.models.util._uuids_with_kept_rows", side_effect=read),
+        ):
+            removed = prune_members_absent_from_replace(cohort, team_id=self.team.pk, marker=marker, floor=marker)
+
+        self.assertEqual(reads[0]["uuids"], sorted((str(person.uuid) for person in people), key=self._clickhouse_order))
+        self.assertEqual((removed, list_cohort_member_ids(self.team.pk, cohort.pk)), (5, []))
 
     def test_replace_presence_check_reads_with_sequential_consistency(self):
         # One ClickHouse node behaves the same without the setting, but a lagging replica wouldn't: the prune would

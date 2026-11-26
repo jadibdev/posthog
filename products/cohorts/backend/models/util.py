@@ -4,10 +4,14 @@ import copy
 import math
 import time
 import uuid
+import heapq
+import struct
+import tempfile
 import functools
+import itertools
 import dataclasses
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, ExitStack
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
@@ -2028,6 +2032,14 @@ PRUNE_PAGE_SIZE = 5_000
 REPLACE_PRUNE_CHECK_BATCH = 50_000
 # Stale members are deleted in chunks of this many, under the delete RPC's cap of 10,000 ids.
 PRUNE_DELETE_CHUNK = 5_000
+# The prune sorts the members it lists, so each check reads one slice of the cohort's ClickHouse rows. It holds this
+# many packed records in memory (about 18 MB) and spills each full run to a temp file, so a cohort of up to this many
+# members is sorted without touching disk.
+PRUNE_SPILL_RUN_SIZE = 250_000
+# A member as the prune sorts it: the ClickHouse sort key of their uuid, then their Postgres id. 24 bytes.
+_PRUNE_RECORD = struct.Struct(">16sq")
+# Spill files are read this many whole records at a time, so a read never splits a record (about 64 KB).
+PRUNE_SPILL_READ_RECORDS = 2_730
 # An add that read the cohort's mode before the replace claim landed writes a buffered row, not a quorum write,
 # so that row can reach a replica after the prune read it. The prune waits this long before re-checking what
 # it removed. The repo has observed sub-second lag between replicas; tests and local dev run one node.
@@ -2063,23 +2075,50 @@ def _cohort_member_id_pages(cohort_id: int, *, page_size: int, read_options: Any
         cursor = resp.next_cursor
 
 
+def _clickhouse_uuid_key(person_uuid: str) -> bytes:
+    """The 16 bytes that sort a uuid the way ClickHouse orders the UUID type: its last 8 bytes, then its first 8.
+
+    ClickHouse documents this order ("UUIDs are sorted by their second half"). In it,
+    00000000-0000-0001-0000-000000000000 sorts before ffffffff-ffff-ffff-0000-000000000001, the opposite of string order.
+    """
+    raw = uuid.UUID(person_uuid).bytes
+    return raw[8:] + raw[:8]
+
+
+def _uuid_from_clickhouse_key(key: bytes) -> str:
+    return str(uuid.UUID(bytes=key[8:] + key[:8]))
+
+
 def _uuids_with_kept_rows(
-    cohort_id: int, team_id: int, person_uuids: list[str], marker: datetime, *, floor: datetime
+    cohort_id: int,
+    team_id: int,
+    person_uuids: list[str],
+    marker: datetime,
+    *,
+    floor: datetime,
+    bounds: tuple[str, str] | None = None,
 ) -> set[str]:
-    """The persons among ``person_uuids`` that have a row the replace keeps (``REPLACE_KEEPS_ROW``)."""
+    """The persons among ``person_uuids`` that have a row the replace keeps (``REPLACE_KEEPS_ROW``).
+
+    ``bounds`` is the first and last of ``person_uuids`` in ClickHouse's uuid order. It limits the read to that slice of
+    the cohort's rows. Without it, uuids spread across the key range make each check read most of the cohort.
+    """
     if not person_uuids:
         return set()
+    bound_clause = " AND person_id >= %(lo)s AND person_id <= %(hi)s" if bounds is not None else ""
+    bound_params = {"lo": bounds[0], "hi": bounds[1]} if bounds is not None else {}
 
     def _read_present_uuids() -> Any:
         tag_queries(product=ProductKey.COHORTS, feature=Feature.COHORT, query_type="static_cohort_replace_membership")
         # nosemgrep: clickhouse-fstring-param-audit - table name from constant, values parameterized
         with _static_cohort_data_route():
             return sync_execute(
-                f"SELECT DISTINCT person_id FROM {PERSON_STATIC_COHORT_TABLE} WHERE team_id = %(team_id)s AND cohort_id = %(cohort_id)s AND {REPLACE_KEEPS_ROW} AND person_id IN %(person_uuids)s",
+                f"SELECT DISTINCT person_id FROM {PERSON_STATIC_COHORT_TABLE} WHERE team_id = %(team_id)s AND cohort_id = %(cohort_id)s AND {REPLACE_KEEPS_ROW} AND person_id IN %(person_uuids)s{bound_clause}",
                 {
                     "team_id": team_id,
                     "cohort_id": cohort_id,
                     "person_uuids": person_uuids,
+                    **bound_params,
                     **replace_keeps_row_params(marker, floor=floor),
                 },
                 settings=REPLACE_READ_SETTINGS,
@@ -2102,20 +2141,31 @@ def _restore_members_whose_rows_arrived(
     floor: datetime,
 ) -> int:
     """Re-check the removed members once the settle time has passed since the last delete, restore
-    any whose kept row has arrived since, and return how many were restored."""
+    any whose kept row has arrived since, and return how many were restored.
+
+    ``removed`` is in ClickHouse's uuid order, as the prune removed them, so each check reads one bounded slice.
+    """
     remaining = REPLACE_PRUNE_SETTLE_SECONDS - (time.monotonic() - last_delete_at)
     if remaining > 0:
         time.sleep(remaining)
     restored_total = 0
     pairs = list(removed.items())
-    for start in range(0, len(pairs), PRUNE_PAGE_SIZE):
-        chunk = dict(pairs[start : start + PRUNE_PAGE_SIZE])
-        arrived = _uuids_with_kept_rows(cohort.pk, team_id, list(chunk.values()), marker, floor=floor)
-        if not arrived:
-            continue
-        require_current_population_marker(cohort.pk, marker)
-        restored = [person_id for person_id, person_uuid in chunk.items() if person_uuid in arrived]
-        insert_cohort_members(team_id, cohort.pk, restored, cohort.version)
+    for start in range(0, len(pairs), REPLACE_PRUNE_CHECK_BATCH):
+        chunk = pairs[start : start + REPLACE_PRUNE_CHECK_BATCH]
+        arrived = _uuids_with_kept_rows(
+            cohort.pk,
+            team_id,
+            [person_uuid for _, person_uuid in chunk],
+            marker,
+            floor=floor,
+            bounds=(chunk[0][1], chunk[-1][1]),
+        )
+        restored = [person_id for person_id, person_uuid in chunk if person_uuid in arrived]
+        for insert_start in range(0, len(restored), PRUNE_PAGE_SIZE):
+            require_current_population_marker(cohort.pk, marker)
+            insert_cohort_members(
+                team_id, cohort.pk, restored[insert_start : insert_start + PRUNE_PAGE_SIZE], cohort.version
+            )
         restored_total += len(restored)
     return restored_total
 
@@ -2138,40 +2188,108 @@ def _member_id_batches(team_id: int, cohort_id: int) -> Iterator[list[int]]:
         yield batch
 
 
+def _spill_read(path: str, stack: ExitStack) -> Iterator[bytes]:
+    """Yield one spill file's records, reading whole records at a time so none is ever split."""
+    spill_file = stack.enter_context(open(path, "rb"))  # noqa: SIM115 - closed by the prune's ExitStack
+    block_size = _PRUNE_RECORD.size * PRUNE_SPILL_READ_RECORDS
+    while block := spill_file.read(block_size):
+        if len(block) % _PRUNE_RECORD.size:
+            raise RuntimeError(f"Prune spill file {path} ends in a partial record")
+        for start in range(0, len(block), _PRUNE_RECORD.size):
+            yield block[start : start + _PRUNE_RECORD.size]
+
+
+def _members_in_clickhouse_order(
+    team_id: int, cohort_id: int, marker: datetime, stack: ExitStack
+) -> Iterator[tuple[str, int]]:
+    """List the cohort's members, resolve them to uuids, and yield ``(uuid, person_id)`` in ClickHouse's uuid order.
+
+    Every member is listed and resolved before the first one is yielded, so the prune's candidates are the membership
+    at that point. An id that doesn't resolve is left out, so the prune keeps it. Runs beyond ``PRUNE_SPILL_RUN_SIZE``
+    records are sorted and spilled to a temp directory that ``stack`` removes on every exit; a cohort that fits in one
+    run never touches disk.
+    """
+    from posthog.models.person.util import get_person_uuids_by_ids
+
+    run: list[bytes] = []
+    spill_paths: list[str] = []
+    spill_dir: str | None = None
+    for batch in _member_id_batches(team_id, cohort_id):
+        require_current_population_marker(cohort_id, marker)
+        for person_id, person_uuid in get_person_uuids_by_ids(team_id, batch, concurrency=4).items():
+            # Spill before appending, so a run of exactly PRUNE_SPILL_RUN_SIZE stays in memory.
+            if len(run) >= PRUNE_SPILL_RUN_SIZE:
+                if spill_dir is None:
+                    spill_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="cohort-prune-"))
+                run.sort()
+                path = f"{spill_dir}/run-{len(spill_paths)}"
+                with open(path, "wb") as spill_file:
+                    spill_file.write(b"".join(run))
+                spill_paths.append(path)
+                run = []
+            run.append(_PRUNE_RECORD.pack(_clickhouse_uuid_key(person_uuid), person_id))
+    run.sort()
+    records: Iterator[bytes] = (
+        heapq.merge(*(_spill_read(path, stack) for path in spill_paths), run) if spill_paths else iter(run)
+    )
+    for record in records:
+        key, person_id = _PRUNE_RECORD.unpack(record)
+        yield _uuid_from_clickhouse_key(key), person_id
+
+
 def prune_members_absent_from_replace(cohort: Cohort, *, team_id: int, marker: datetime, floor: datetime) -> int:
     """Remove every Postgres member the replace doesn't keep, and return how many were removed.
 
     A member is removed only when it resolves to a person and that person has no ClickHouse row the replace
-    keeps (``REPLACE_KEEPS_ROW``): a row this attempt wrote, or a row added since the request. Members are
-    checked in batches of ``REPLACE_PRUNE_CHECK_BATCH`` and deleted in chunks of ``PRUNE_DELETE_CHUNK``.
+    keeps (``REPLACE_KEEPS_ROW``): a row this attempt wrote, or a row added since the request.
+
+    Members are walked in ClickHouse's uuid order and checked in contiguous batches of ``REPLACE_PRUNE_CHECK_BATCH``,
+    each read bounded to its slice of the cohort's rows, so the checks read about the cohort's rows once in total.
+    Each batch is checked right before its stale members are deleted, in chunks of ``PRUNE_DELETE_CHUNK``.
 
     The removed members are checked again once the settle time has passed since the last delete, and
     any whose row has arrived since are restored: an add that read the cohort's mode before the replace
-    claim landed isn't a quorum write, so its row can
-    reach the replica after the prune read it. The re-check runs once per settle batch, not once per
-    page. It only ever restores people this prune removed, so it can't bring back a member a manual
-    remove deleted while that remove's ClickHouse mutation is still pending.
+    claim landed isn't a quorum write, so its row can reach the replica after the prune read it. The removed members
+    wait for that re-check until there are ``REPLACE_PRUNE_SETTLE_BATCH`` of them, so one wait covers many deletes,
+    and the re-check reads them in batches of ``REPLACE_PRUNE_CHECK_BATCH``. It only ever restores people this prune
+    removed, so it can't bring back a member a manual remove deleted while that remove's ClickHouse mutation is
+    still pending.
     """
-    from posthog.models.person.util import get_person_uuids_by_ids
-
     removed_total = 0
     awaiting_recheck: dict[int, str] = {}
     last_delete_at = 0.0
-    for batch in _member_id_batches(team_id, cohort.pk):
-        require_current_population_marker(cohort.pk, marker)
-        # An id that doesn't resolve is left out, so the prune keeps it.
-        uuids_by_id = get_person_uuids_by_ids(team_id, batch, concurrency=4)
-        present = _uuids_with_kept_rows(cohort.pk, team_id, list(uuids_by_id.values()), marker, floor=floor)
-        stale_items = [(person_id, uuid_) for person_id, uuid_ in uuids_by_id.items() if uuid_ not in present]
-        for start in range(0, len(stale_items), PRUNE_DELETE_CHUNK):
-            chunk = dict(stale_items[start : start + PRUNE_DELETE_CHUNK])
+    with ExitStack() as stack:
+        members = _members_in_clickhouse_order(team_id, cohort.pk, marker, stack)
+        for batch in itertools.batched(members, REPLACE_PRUNE_CHECK_BATCH, strict=False):
             require_current_population_marker(cohort.pk, marker)
-            delete_cohort_members_by_person_ids(team_id, cohort.pk, list(chunk))
-            last_delete_at = time.monotonic()
-            removed_total += len(chunk)
-            awaiting_recheck.update(chunk)
-            if len(awaiting_recheck) < REPLACE_PRUNE_SETTLE_BATCH:
-                continue
+            present = _uuids_with_kept_rows(
+                cohort.pk,
+                team_id,
+                [person_uuid for person_uuid, _ in batch],
+                marker,
+                floor=floor,
+                bounds=(batch[0][0], batch[-1][0]),
+            )
+            stale_items = [(person_id, person_uuid) for person_uuid, person_id in batch if person_uuid not in present]
+            for start in range(0, len(stale_items), PRUNE_DELETE_CHUNK):
+                chunk = dict(stale_items[start : start + PRUNE_DELETE_CHUNK])
+                require_current_population_marker(cohort.pk, marker)
+                delete_cohort_members_by_person_ids(team_id, cohort.pk, list(chunk))
+                last_delete_at = time.monotonic()
+                removed_total += len(chunk)
+                awaiting_recheck.update(chunk)
+                if len(awaiting_recheck) < REPLACE_PRUNE_SETTLE_BATCH:
+                    continue
+                removed_total -= _restore_members_whose_rows_arrived(
+                    cohort,
+                    team_id=team_id,
+                    marker=marker,
+                    removed=awaiting_recheck,
+                    last_delete_at=last_delete_at,
+                    floor=floor,
+                )
+                awaiting_recheck = {}
+        if awaiting_recheck:
             removed_total -= _restore_members_whose_rows_arrived(
                 cohort,
                 team_id=team_id,
@@ -2180,11 +2298,6 @@ def prune_members_absent_from_replace(cohort: Cohort, *, team_id: int, marker: d
                 last_delete_at=last_delete_at,
                 floor=floor,
             )
-            awaiting_recheck = {}
-    if awaiting_recheck:
-        removed_total -= _restore_members_whose_rows_arrived(
-            cohort, team_id=team_id, marker=marker, removed=awaiting_recheck, last_delete_at=last_delete_at, floor=floor
-        )
     return removed_total
 
 
