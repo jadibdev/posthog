@@ -34,8 +34,10 @@ import sys
 import json
 import time
 import uuid
+import shutil
 import hashlib
 import resource
+import tempfile
 import threading
 import subprocess
 from collections import defaultdict
@@ -403,13 +405,73 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
             stack.enter_context(patch(f"{UTIL}.is_static_cohort_replace_enabled", return_value=True))
         for name in phases:
             stack.enter_context(patch(f"{UTIL}.{name}", recorder.timed(name, getattr(util, name))))
-        if hasattr(util, "_uuids_present_at_marker"):
-            stack.enter_context(
-                patch(
-                    f"{UTIL}._uuids_present_at_marker",
-                    recorder.timed("membership_read", util._uuids_present_at_marker),
-                )
+        # The membership check was renamed in review 6. The restore re-check calls the same function, so
+        # its calls are recorded under their own name while the restore runs.
+        membership_name = next(
+            (name for name in ("_uuids_with_kept_rows", "_uuids_present_at_marker") if hasattr(util, name)), None
+        )
+        in_restore = False
+        if membership_name is not None:
+            timed_presence = recorder.timed("membership_read", getattr(util, membership_name))
+            timed_restore = recorder.timed("restore_membership_read", getattr(util, membership_name))
+
+            def _membership_read(*args: Any, **kwargs: Any) -> Any:
+                return (timed_restore if in_restore else timed_presence)(*args, **kwargs)
+
+            stack.enter_context(patch(f"{UTIL}.{membership_name}", _membership_read))
+        if hasattr(util, "_restore_members_whose_rows_arrived"):
+            # Retag the restore's reads so the query log splits presence rows from restore rows.
+            orig_restore = recorder.timed("restore_recheck", util._restore_members_whose_rows_arrived)
+            orig_tag_queries = util.tag_queries
+
+            def _restore_tag_queries(*args: Any, **kwargs: Any) -> Any:
+                if kwargs.get("query_type") == "static_cohort_replace_membership":
+                    kwargs["query_type"] = "static_cohort_replace_restore_membership"
+                return orig_tag_queries(*args, **kwargs)
+
+            def _restore(*args: Any, **kwargs: Any) -> Any:
+                nonlocal in_restore
+                in_restore = True
+                try:
+                    with patch(f"{UTIL}.tag_queries", _restore_tag_queries):
+                        return orig_restore(*args, **kwargs)
+                finally:
+                    in_restore = False
+
+            stack.enter_context(patch(f"{UTIL}._restore_members_whose_rows_arrived", _restore))
+        # What the prune starts from, counted outside its timer: the cohort's physical ClickHouse rows (the bars'
+        # R) and the members it lists from Postgres (what a sorted spill would hold, 24 bytes each).
+        at_prune_start: dict[str, int] = {}
+        timed_prune = util.prune_members_absent_from_replace
+
+        def _prune(*args: Any, **kwargs: Any) -> Any:
+            rows = _ch(
+                "SELECT count() FROM person_static_cohort WHERE team_id = %(team)s AND cohort_id = %(cohort)s",
+                {"team": team.id, "cohort": cohort.id},
+                "bench_rows_at_prune_start",
             )
+            at_prune_start["rows_in_table"] = int(rows[0][0])
+            at_prune_start["members_listed"] = _postgres_membership(team.id, cohort.id)[0]
+            return timed_prune(*args, **kwargs)
+
+        stack.enter_context(patch(f"{UTIL}.prune_members_absent_from_replace", _prune))
+        # A spill's temp directory is gone by the time the task returns, so measure it as it's cleaned up.
+        temp_dir_peak_bytes = 0
+        orig_cleanup = tempfile.TemporaryDirectory.cleanup
+
+        def _cleanup(self: Any) -> None:
+            nonlocal temp_dir_peak_bytes
+            total_bytes = 0
+            for root, _dirs, files in os.walk(self.name):
+                for file_name in files:
+                    try:
+                        total_bytes += os.path.getsize(os.path.join(root, file_name))
+                    except OSError:
+                        pass
+            temp_dir_peak_bytes = max(temp_dir_peak_bytes, total_bytes)
+            orig_cleanup(self)
+
+        stack.enter_context(patch.object(tempfile.TemporaryDirectory, "cleanup", _cleanup))
         if hasattr(util, "_copy_static_cohort_rows_to_pg"):
             stack.enter_context(
                 patch(
@@ -464,6 +526,7 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
             )
         )
 
+        disk_free_before = shutil.disk_usage(tempfile.gettempdir()).free
         rss_current_before = _current_rss_mb()
         started_wall = time.time()
         started = time.perf_counter()
@@ -488,6 +551,15 @@ def run_replace_cell(members: int, churn: float) -> dict[str, Any]:
         "phase_seconds": {name: round(recorder.seconds[name], 2) for name in phases},
         "membership_read_seconds": round(recorder.seconds["membership_read"], 2),
         "membership_read_calls": recorder.calls["membership_read"],
+        "restore_membership_read_seconds": round(recorder.seconds["restore_membership_read"], 2),
+        "restore_membership_read_calls": recorder.calls["restore_membership_read"],
+        "restore_recheck_seconds": round(recorder.seconds["restore_recheck"], 2),
+        "restore_recheck_calls": recorder.calls["restore_recheck"],
+        "rows_in_table_at_prune_start": at_prune_start.get("rows_in_table"),
+        "members_listed_at_prune_start": at_prune_start.get("members_listed"),
+        "prune_temp_disk_mb": round(temp_dir_peak_bytes / 1_000_000, 1),
+        "disk_free_gb_before_replace": round(disk_free_before / 1e9, 1),
+        "disk_free_gb_after_replace": round(shutil.disk_usage(tempfile.gettempdir()).free / 1e9, 1),
         "copy_passes": recorder.calls.get("copy_static_cohort_rows_to_pg", 0),
         "quorum_read_calls": quorum_read_calls,
         "quorum_read_retries_289": quorum_read_retries_289,
