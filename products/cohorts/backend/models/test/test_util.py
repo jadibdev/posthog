@@ -645,10 +645,16 @@ class TestCohortUtils(BaseTest):
         ):
             insert_cohort_people_into_pg(cohort, team_id=self.team.id, min_rows=1)
 
-        insert_static_cohort([person.uuid], cohort.pk, team_id=self.team.id)
-        insert_cohort_people_into_pg(cohort, team_id=self.team.id, min_rows=1)
+        # ClickHouse orders uuids by their last 8 bytes first, so a uuid whose last 8 bytes are zero sorts right after
+        # the nil uuid. The copy must still read it.
+        zero_tail = create_person(
+            team=self.team, distinct_ids=["zero tail"], uuid=uuid.UUID(bytes=uuid4().bytes[:8] + bytes(8))
+        )
+        flush_persons_and_events()
+        insert_static_cohort([person.uuid, zero_tail.uuid], cohort.pk, team_id=self.team.id)
+        insert_cohort_people_into_pg(cohort, team_id=self.team.id, min_rows=2)
 
-        self.assertEqual(list_cohort_member_ids(self.team.id, cohort.pk), [person.id])
+        self.assertCountEqual(list_cohort_member_ids(self.team.id, cohort.pk), [person.id, zero_tail.id])
 
     def test_copy_to_postgres_rereads_until_it_has_seen_the_rows_it_wrote(self):
         cohort = _create_cohort(team=self.team, name="test_cohort", groups=[], is_static=True)
@@ -705,7 +711,7 @@ class TestCohortUtils(BaseTest):
             insert_cohort_people_into_pg(cohort, team_id=self.team.id, min_rows=2, replace_marker=marker)
 
         cursors = [call.args[1]["cursor"] for call in mock_execute.call_args_list]
-        self.assertEqual(cursors, ["00000000-0000-0000-0000-000000000001", str(u2), str(u2)])
+        self.assertEqual(cursors, ["00000000-0000-0001-0000-000000000000", str(u2), str(u2)])
         self.assertEqual([c.args[0] for c in mock_sleep.call_args_list], [STATIC_COHORT_READ_BACK_WAITS_SECONDS[0]])
         self.assertCountEqual(list_cohort_member_ids(self.team.id, cohort.id), [p1.id, p2.id])
 

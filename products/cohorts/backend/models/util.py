@@ -1631,6 +1631,12 @@ def insert_cohort_people_into_pg(
 CH_PAGE_SIZE = 10_000
 
 
+# ClickHouse orders the UUID type by its last 8 bytes, then its first 8 ("UUIDs are sorted by their second half"),
+# so this is the first uuid after the nil uuid. The copy starts here and never reads a nil-uuid row that older query inserts wrote. Starting
+# at ...0001 instead would skip every uuid whose last 8 bytes are zero.
+CLICKHOUSE_UUID_AFTER_NIL = "00000000-0000-0001-0000-000000000000"
+
+
 def _copy_static_cohort_rows_to_pg(
     cohort: Cohort,
     *,
@@ -1765,9 +1771,7 @@ def _copy_static_cohort_rows_to_pg(
         if not any_counted_resolved and (resolved & counted_in_batch):
             any_counted_resolved = True
 
-    batch_iterator = CursorBatchIterator(
-        fetch_batch, CH_PAGE_SIZE, initial_cursor="00000000-0000-0000-0000-000000000001"
-    )
+    batch_iterator = CursorBatchIterator(fetch_batch, CH_PAGE_SIZE, initial_cursor=CLICKHOUSE_UUID_AFTER_NIL)
     # raise_on_error hands a partial sync to the caller instead of reporting success, which is
     # what lets the population tasks retry it. The caller also owns the cohort's state: a pass that
     # read too few rows must not mark it finished while another pass is coming.
